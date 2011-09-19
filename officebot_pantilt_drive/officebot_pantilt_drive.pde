@@ -3,6 +3,7 @@
 // Created by Zhengqin Fan
 // Modified 2011-09-09 by Alaina Hardie
 // Modified 2011-09-14 by Dan Barry
+// Modified 2011-09-16 by Zhengqin Fan
 
 // Requires Roomba library, available at:
 // http://www.open.com.au/mikem/arduino/Roomba/
@@ -23,13 +24,15 @@
 #define MIN_TURN_SPEED 50
 #define DELTA_FORWARD_SPEED 50
 #define DELTA_TURN_SPEED 50
-#define DEFAULT_FORWARD_SPEED 300
-#define DEFAULT_BACKWARD_SPEED -300
-#define DEFAULT_TURN_SPEED 200
+#define DEFAULT_FORWARD_SPEED 200
+#define DEFAULT_BACKWARD_SPEED -200
+#define DEFAULT_TURN_SPEED 150
 #define RAMPUP_SPEED_DELAY 300  // controls how long between speed steps when ramping up from a stop to default speed
 
 #define TIME_OUT 3000  // number of milliseconds to wait for command before you consider it a timeout and stop the base
 #define TURN_OFF_CREATE 900000  // number of milliseconds of inactivity before powering down create to save battery power (15 min = 900 seconds = 900000 msec)
+
+#define Drive_delayTime 1500 
 
 /*
 typedef struct 
@@ -77,6 +80,8 @@ const int rightCmd = 5;    // interrupt 5 is on pin 18
 
 const int emergencyShutdownCmd = 0;  // interrupt 0 is on pin 2  shuts down the create in response to a button push
 
+int interruptMonitor = 0;
+int stopIt = 0;
 
 int driving = DRIVING_NONE; // true if it's in the driving state
 unsigned long lastCmdMs; // The number of milliseconds since the program started that the last command was received
@@ -136,128 +141,78 @@ void emergencyShutdown()
 
 void moveForward()
 {
-  powerOnCreate();  // if the create is not powered on, turn it on.
-  if (baseFwdSpeed == 0) // if starting from a stop, begin with default speed
+  if (interruptMonitor == 1)
   {
-    while (baseFwdSpeed < DEFAULT_FORWARD_SPEED)  // ramp up to speed from a stop
-    {
-      baseFwdSpeed += DELTA_FORWARD_SPEED;
-      myBase.drive(baseFwdSpeed, myBase.DriveStraight);
-      delay(RAMPUP_SPEED_DELAY);
-    }
-    driving = DRIVING_FORWARD;
+    stopIt = 1;
+    interruptMonitor = 0;
   }
-  else
-  {  
-    if (driving == DRIVING_BACKWARD && baseFwdSpeed + DELTA_FORWARD_SPEED > MIN_BACKWARD_SPEED) stop();  // if we are slowing down and get real slow, stop.
-    else  // we are either moving forward or we are moving backward with sufficient speed to be OK to slow down without stopping
-    {
-      if (baseFwdSpeed <= MAX_FORWARD_SPEED - DELTA_FORWARD_SPEED) baseFwdSpeed += DELTA_FORWARD_SPEED;  // moving foward or slowing down backward means adding DELTA_FORWARD_SPEED
-      myBase.drive(baseFwdSpeed, myBase.DriveStraight);
-      if (baseFwdSpeed > 0) driving = DRIVING_FORWARD;
-      else driving = DRIVING_BACKWARD;
-    }
+  else 
+  {
+    interrupts();
+    powerOnCreate();  // if the create is not powered on, turn it on.
+    myBase.drive(DEFAULT_FORWARD_SPEED, myBase.DriveStraight);
+    delay(Drive_delayTime);
+    stop();
+    baseTurnSpeed = 0;
   }
-  baseTurnSpeed = 0;
-  lastCmdMs = millis();  // remember when the command was done
 }
 
 void moveBackward()
 {
-  powerOnCreate();
-  if (baseFwdSpeed == 0) // if starting from a stop, begin with default speed
+  if (interruptMonitor == 1)
   {
-    while (baseFwdSpeed > DEFAULT_BACKWARD_SPEED)  // ramp up to speed from a stop
-    {
-      baseFwdSpeed -= DELTA_FORWARD_SPEED;
-      myBase.drive(baseFwdSpeed, myBase.DriveStraight);
-      delay(RAMPUP_SPEED_DELAY);
-    }
-    driving = DRIVING_BACKWARD;
+    stopIt = 1;
   }
   else 
   {
-    if (driving == DRIVING_FORWARD && baseFwdSpeed - DELTA_FORWARD_SPEED < MIN_FORWARD_SPEED) stop();  // if we are slowing down and get real slow, stop.
-    else
-    {
-      if (baseFwdSpeed >= MAX_BACKWARD_SPEED + DELTA_FORWARD_SPEED) baseFwdSpeed -= DELTA_FORWARD_SPEED;
-      myBase.drive(baseFwdSpeed, myBase.DriveStraight);
-      if (baseFwdSpeed < 0) driving = DRIVING_BACKWARD;
-      else driving = DRIVING_FORWARD;
-    }
+    interrupts();
+    powerOnCreate();  // if the create is not powered on, turn it on.
+    myBase.drive(DEFAULT_BACKWARD_SPEED, myBase.DriveStraight);
+    delay(Drive_delayTime);
+    stop();
+    baseTurnSpeed = 0;
   }
-  baseTurnSpeed = 0;
-  lastCmdMs = millis();  // remember when the command was done
-}
-
-void turnRight()
-{
-  powerOnCreate();
-  if (baseTurnSpeed == 0) // if starting from a stop, begin with default speed
-  {
-    while (baseTurnSpeed < DEFAULT_TURN_SPEED)  // ramp up to speed from a stop
-    {
-      baseFwdSpeed += DELTA_TURN_SPEED;
-      myBase.drive(baseTurnSpeed, myBase.DriveInPlaceCounterClockwise); // this is wrong, for some reason; left should be counter and right should be clockwise
-      delay(RAMPUP_SPEED_DELAY);
-    }
-    driving = DRIVING_TURNRIGHT;  
-  }
-  else
-  {
-    if (driving == DRIVING_TURNLEFT && baseTurnSpeed - DELTA_TURN_SPEED < MIN_TURN_SPEED) stop();  // if we are slowing down and get real slow, stop
-    else
-    {
-      if (driving == DRIVING_TURNLEFT)
-      {
-        baseTurnSpeed -= DELTA_TURN_SPEED;  // got a turn right command while turning left, means slow down the turn, but still turn left
-        myBase.drive(baseTurnSpeed, myBase.DriveInPlaceClockwise); // this is wrong, for some reason; left should be counter and right should be clockwise
-      }
-      else
-      {
-        if (baseTurnSpeed <= MAX_TURN_SPEED - DELTA_TURN_SPEED) baseTurnSpeed += DELTA_TURN_SPEED;  // got a turn right command while turning right, means speed up the turn
-        myBase.drive(baseTurnSpeed, myBase.DriveInPlaceCounterClockwise); // this is wrong, for some reason; left should be counter and right should be clockwise
-      }
-    }
-  } 
-  baseFwdSpeed = 0;
-  lastCmdMs = millis();  // remember when the command was done
 }
 
 void turnLeft()
 {
-  powerOnCreate();
-  if (baseTurnSpeed == 0) // if starting from a stop, begin with default speed
-  {
-    while (baseTurnSpeed < DEFAULT_TURN_SPEED)  // ramp up to speed from a stop
+    if (interruptMonitor == 1)
     {
-      baseFwdSpeed += DELTA_TURN_SPEED;
-      myBase.drive(baseTurnSpeed, myBase.DriveInPlaceClockwise); // this is wrong, for some reason; left should be counter and right should be clockwise
-      delay(RAMPUP_SPEED_DELAY);
+      stopIt = 1;
     }
-    driving = DRIVING_TURNLEFT;  
-  }
-  else
-  {
-    if (driving == DRIVING_TURNRIGHT && baseTurnSpeed - DELTA_TURN_SPEED < MIN_TURN_SPEED) stop();  // if we are slowing down and get real slow, stop
-    else
+    else 
     {
-      if (driving == DRIVING_TURNRIGHT)
-      {
-        baseTurnSpeed -= DELTA_TURN_SPEED;  // got a turn left command while turning right, means slow down the turn, but still turn right
-        myBase.drive(baseTurnSpeed, myBase.DriveInPlaceCounterClockwise); // this is wrong, for some reason; left should be counter and right should be clockwise
-      }
-      else
-      {
-        if (baseTurnSpeed <= MAX_TURN_SPEED - DELTA_TURN_SPEED) baseTurnSpeed += DELTA_TURN_SPEED;  // got a turn left command while turning left, means speed up the turn
-        myBase.drive(baseTurnSpeed, myBase.DriveInPlaceClockwise); // this is wrong, for some reason; left should be counter and right should be clockwise
-      }
+      interrupts();
+      powerOnCreate();  // if the create is not powered on, turn it on.
+      myBase.drive(DEFAULT_TURN_SPEED, myBase.DriveInPlaceCounterClockwise);
+      delay(Drive_delayTime);
+      stop();
+      baseFwdSpeed = 0;
     }
-  } 
-  baseFwdSpeed = 0;
-  lastCmdMs = millis();  // remember when the command was done
 }
 
+void turnRight()
+{
+  interrupts();
+  if (interruptMonitor == 1)
+    {
+      stopIt = 1;
+    }
+  else 
+    {
+      interruptMonitor = 1;
+      delay(5);  // waiting for interruption in reset command
+      if (stopIt != 1)
+      {
+        powerOnCreate();  // if the create is not powered on, turn it on.
+        myBase.drive(DEFAULT_TURN_SPEED, myBase.DriveInPlaceClockwise);
+        delay(Drive_delayTime);
+        stop();
+        baseFwdSpeed = 0;
+        interruptMonitor = 0;
+      }
+    }
+}
 
 void stop()
 {
@@ -269,6 +224,17 @@ void stop()
   lastCmdMs = millis();
 }
   
+void flashLED(int pinNum = 7, int delayTime = 500, int numFlashes = 1)
+{
+  pinMode(pinNum, OUTPUT);
+  for (int i = 0; i < numFlashes; i++)
+  {
+    digitalWrite(pinNum, HIGH);
+    delay(delayTime);
+    digitalWrite(pinNum, LOW);
+    delay(delayTime);
+  }
+}
 
 void setup() 
 { 
@@ -283,28 +249,20 @@ void setup()
   attachInterrupt(rightCmd, turnRight, RISING);
   attachInterrupt(emergencyShutdownCmd, emergencyShutdown, LOW);
   
-  // start serial port at 57600 bps for the create
-  //Serial2.begin(57600); 
+// start serial port at 57600 bps for the create
+/*  Serial2.begin(57600); */
   myBase.start();
   myBase.fullMode();
-  stop();  // this will power up the create and initialize the state
+/*  stop();  // this will power up the create and initialize the state*/
 }
 
-void loop() 
-{   
-  //if ((millis() > lastCmdMs + TIME_OUT) && (driving != DRIVING_NONE) ) stop();
-  //if (millis() > lastCmdMs + TURN_OFF_CREATE) powerOffCreate();
-  
-  /*
-  myBase.getSensors (myBase.Sensors7to26, (uint8_t *)&sensors, sizeof(sensors));
-  // should be unnecessary in safe mode; here for testing
-  if (sensors.bumpsAndWheelDrops || sensors.wall || sensors.cliffLeft || sensors.cliffFrontLeft ||
-          sensors.cliffFrontRight || sensors.cliffRight || sensors.virtualWall) stop();
-          
-  */
-  roomba.leds(0x02,128,255);
-  delay(500);
-  roomba.leds(0x00,0,128);
-  delay(500);
+void loop()
+{
+  if (stopIt == 1)
+  {
+/*    flashLED();*/
+    stop();
+    stopIt = 0;
+  }
 }
  
